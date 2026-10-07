@@ -1,0 +1,9 @@
+{
+  "name": "Caminos PNOA de ejemplo",
+  "gsd": 0.2,
+  "threshold": 0.5,
+  "areas": [
+    {"bbox": [-3.7140, 41.9910, -3.7100, 41.9940], "split": "train"},
+    {"bbox": [-3.6840, 41.9910, -3.6800, 41.9940], "split": "val"}
+  ]
+}

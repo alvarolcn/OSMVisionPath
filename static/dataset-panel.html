@@ -1,0 +1,66 @@
+<aside>
+  <div class="eyebrow">DATOS PNOA + APRENDIZAJE</div><h1>Tu modelo,<br>con tus caminos.</h1>
+  <p class="intro">Genera imágenes y máscaras iniciales, revísalas y ajusta D-LinkNet34.</p>
+  <section><h2><span>01</span> Preparar un dataset</h2>
+    <label>Fuente de ortofoto<select id="ds-source"><option value="pnoa">PNOA IGN</option><option value="itacyl">ITACyL Castilla y León</option></select></label><small>ITACyL cubre Castilla y León.</small><label>Nombre<input id="ds-name" type="text" value="Caminos PNOA" maxlength="100"></label>
+    <label>Asignar la próxima zona a<select id="ds-split"><option value="train">Entrenamiento</option><option value="val">Validación</option><option value="test">Evaluación final (reservada)</option></select></label>
+    <small>Puedes añadir varias zonas de cada tipo. Para entrenar necesitas al menos una de Entrenamiento (para aprender) y otra separada de Validación (para comprobar el resultado). Evaluación final no sustituye a Validación.</small>
+    <button id="ds-choose-area" class="map-picker-button">Elegir zona en OpenStreetMap</button>
+    <label>Bounding box WGS84<input id="ds-bbox" type="text" placeholder="oeste, sur, este, norte"></label><button id="ds-add-bbox">Añadir bounding box</button>
+    <small>El selector de OpenStreetMap rellena las coordenadas. Pulsa «Añadir bounding box» para guardar la zona. Añade una zona de entrenamiento y otra separada de validación. Máximo 8 zonas y 256 teselas por lote.</small><div id="ds-areas"></div>
+    <small id="ds-split-status" role="status" aria-live="polite"></small>
+    <label>Resolución solicitada (m/píxel)<input id="ds-gsd" type="number" min="0.1" max="1" step="0.05" value="0.2"></label>
+    <label>Umbral de la máscara inicial<input id="ds-threshold" type="number" min="0.05" max="0.95" step="0.05" value="0.5"></label>
+    <div class="row"><button id="ds-estimate">Calcular teselas</button><strong id="ds-estimate-info"></strong></div>
+    <button id="ds-generate" class="primary">Descargar y generar máscaras</button><small>Usa el ONNX activo del editor. Las máscaras son borradores, no etiquetas verificadas.</small>
+  </section>
+  <section><h2><span>02</span> Revisar y CVAT</h2>
+    <label>Dataset guardado<select id="ds-datasets"><option value="">Selecciona un dataset</option></select></label><button id="ds-refresh">Actualizar lista</button><small id="ds-summary"></small>
+    <label>Tesela<select id="ds-tiles"><option value="">Sin teselas</option></select></label>
+    <div class="dataset-review-progress"><strong id="ds-review-progress-label">0 / 0 teselas revisadas · 0 %</strong><div id="ds-review-progress" role="progressbar" aria-label="Teselas revisadas y guardadas" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="ds-review-progress-fill"></span></div><small>Cuenta las máscaras marcadas como revisadas y guardadas.</small></div>
+    <select id="ds-brush-tool" hidden aria-label="Herramienta de máscara"><option value="road">Pintar vía</option><option value="erase">Borrar vía</option></select>
+    <small>Marca toda la anchura de la vía. También puedes revisar teselas sin caminos.</small>
+    <div class="dataset-downloads"><a id="ds-export-images">Imágenes para CVAT</a><a id="ds-export-cvat">Máscaras para CVAT</a><a id="ds-export-bundle">Dataset completo</a></div>
+    <details><summary>Cómo usar CVAT</summary><small>Crea una tarea con las imágenes y una etiqueta <strong>road</strong>. Importa las máscaras con formato <strong>Segmentation Mask</strong>, revisa y exporta en ese mismo formato. No necesitas conectar tu cuenta a esta aplicación.</small><a href="https://docs.cvat.ai/docs/dataset_management/formats/format-smask/" target="_blank" rel="noopener">Documentación del formato</a></details>
+    <label>Máscaras revisadas de CVAT<input id="ds-cvat-file" type="file" accept=".zip"></label><button id="ds-import" disabled>Importar ZIP revisado</button>
+  </section>
+  <section><h2><span>03</span> Entrenar y usar</h2>
+    <label>Modelo de partida (.th)<select id="ds-checkpoint"><option value="models/best.th">Modelo predeterminado</option></select></label>
+    <small id="ds-checkpoint-path" class="model-path"></small><small>El modelo predeterminado está en models/best.th. Cada entrenamiento guarda sus pesos en datasets/&lt;dataset&gt;/runs/&lt;entrenamiento&gt;/best.th. Selecciona un best.th para continuar desde esos pesos. También se listan los .th de la raíz y de models/. Deben ser compatibles con D-LinkNet34.</small>
+    <label>Épocas<input id="ds-epochs" type="number" min="1" max="100" value="10"></label>
+    <label>Dispositivo<select id="ds-device"><option value="auto">Automático (GPU si está disponible)</option><option value="cpu">CPU</option><option value="cuda">GPU NVIDIA / CUDA</option></select></label>
+    <small>Automático elige CPU o GPU; no incluye máscaras pendientes de revisar.</small>
+    <label class="toggle"><input id="ds-allow-auto" type="checkbox"> Incluir máscaras automáticas sin revisar</label><small>Experimental: sus métricas miden acuerdo con borradores, no precisión frente a etiquetas humanas.</small>
+    <button id="ds-train" class="primary" disabled>Entrenar y exportar ONNX</button><small>Necesita requirements-training.txt. Ajusta los pesos del modelo de partida seleccionado, guarda cada entrenamiento por separado y usa zonas separadas.</small>
+    <small id="ds-training-status" role="status" aria-live="polite"></small>
+    <label>Entrenamientos<select id="ds-runs"><option value="">Sin entrenamientos</option></select></label><button id="ds-activate" disabled>Usar este modelo en el editor</button><small>Solo se activa cuando el ONNX supera la comprobación de equivalencia numérica.</small>
+  </section>
+</aside>
+<div class="dataset-workspace">
+  <div class="toolbar"><strong>Dataset y entrenamiento</strong><span id="ds-directory">Selecciona o prepara un dataset</span></div>
+  <div class="dataset-job"><progress id="ds-progress" max="1" value="0"></progress><span id="ds-job-status" role="status">Sin trabajos activos.</span><button id="ds-cancel" disabled>Cancelar trabajo</button></div>
+  <div class="dataset-photo">
+    <div class="toolbar dataset-tile-toolbar" aria-label="Navegación de teselas">
+      <button id="ds-prev-tile" type="button" aria-label="Tesela anterior" disabled>←</button>
+      <strong id="ds-tile-position">Sin tesela</strong>
+      <span id="ds-tile-split" class="tile-badge"></span>
+      <span id="ds-tile-coverage" title="Porcentaje de píxeles marcados como vía; no es una medida de precisión del modelo."></span>
+      <span id="ds-tile-review" class="tile-badge" role="status"></span>
+      <button id="ds-next-tile" type="button" aria-label="Tesela siguiente" disabled>→</button>
+    </div>
+    <div class="dataset-brush-toolbar">
+      <div class="editor-tools" role="group" aria-label="Herramientas de máscara">
+        <button id="ds-paint" type="button" aria-pressed="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 4 6 6-9 9-7 1 1-7Z M12 6l6 6"/></svg><span>Pintar vía</span></button>
+        <button id="ds-erase" type="button" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 3 7 7-10 10H7l-5-5Z M6 11l7 7 M11 20h10"/></svg><span>Borrar vía</span></button>
+      </div>
+      <label>Grosor <output id="ds-brush-value">12 px</output><input id="ds-brush-size" type="range" min="1" max="60" value="12"></label>
+      <button id="ds-undo-mask" type="button" title="Deshacer último trazo (Ctrl + Z)" disabled>↶ Deshacer</button>
+      <label class="toggle"><input id="ds-show-mask" type="checkbox" checked> Mostrar máscara</label>
+      <label class="toggle"><input id="ds-reviewed" type="checkbox"> He revisado esta máscara</label>
+      <button id="ds-save" class="primary" disabled>Guardar máscara →</button>
+    </div>
+    <div class="dataset-preview"><canvas id="ds-canvas" width="512" height="512" hidden aria-label="Editor de máscara: arrastra para pintar o borrar la vía; Ctrl + Z deshace el último trazo"></canvas><p id="ds-empty">Elige zonas y genera un dataset para revisar sus teselas aquí.</p></div>
+  </div>
+  <p id="ds-status" role="status" aria-live="polite">Las imágenes y máscaras se guardan en datasets/ dentro del proyecto.</p>
+  <details><summary>Registro del trabajo</summary><pre id="ds-log"></pre></details>
+</div>

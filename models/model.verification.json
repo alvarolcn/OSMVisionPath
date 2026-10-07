@@ -1,0 +1,28 @@
+{
+  "checkpoint": "best.th",
+  "checkpoint_sha256": "4b945c0f8a9a0433c4c5bec5ea383c6e78a40d45f460328e446ef0df91486eb1",
+  "onnx": "model.onnx",
+  "opencv": "5.0.0",
+  "torch": "2.14.1+cpu",
+  "input": "RGB float32 [0,1], NCHW 1x3x512x512",
+  "embedded_preprocessing": "RGB to BGR; multiply by 3.2 and subtract 1.6",
+  "output": "road probability 1x1x512x512",
+  "verification": [
+    {
+      "image": 0,
+      "max_abs_error": 6.9141387939453125e-06,
+      "mean_abs_error": 8.713680471617025e-11
+    },
+    {
+      "image": 1,
+      "max_abs_error": 2.4410837795585394e-09,
+      "mean_abs_error": 1.1071183100602906e-14
+    },
+    {
+      "image": 2,
+      "max_abs_error": 6.520748138427734e-05,
+      "mean_abs_error": 3.479662069594269e-08
+    }
+  ],
+  "limitations": "single-pass resized image; no original 8-way test-time augmentation; no PNOA accuracy claim"
+}
