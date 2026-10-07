@@ -1,3 +1,4 @@
+import polygon_area
 """Endpoint-guided segmentation of native pixels, with bounded cached tiles."""
 import heapq
 import math
@@ -62,6 +63,8 @@ def route(probability, start, end, search_limit=DEFAULT_SEARCH_LIMIT, centering=
             nx, ny = x + dx, y + dy
             if not (0 <= nx < w and 0 <= ny < h) or probability[ny, nx] < 0:
                 continue
+            if dx and dy and (probability[y,nx]<0 or probability[ny,x]<0):
+                continue
             cost = 1 + 30 * (1 - float(probability[ny, nx])) ** 2
             if centering is not None:
                 cost += float(centering[ny,nx])
@@ -74,7 +77,7 @@ def route(probability, start, end, search_limit=DEFAULT_SEARCH_LIMIT, centering=
     raise ValueError('No hay conexión en la zona analizada. Añade un punto intermedio para indicar el desvío.')
 
 
-def trace(image, anchors, threshold, image_key, search_limit=DEFAULT_SEARCH_LIMIT, tolerance_m=.5, bbox=None):
+def trace(image, anchors, threshold, image_key, search_limit=DEFAULT_SEARCH_LIMIT, tolerance_m=.5, bbox=None, polygon=None):
     h, w = image.shape[:2]
     if bbox is None:
         bbox = (0.,0.,float(w),float(h))
@@ -111,6 +114,11 @@ def trace(image, anchors, threshold, image_key, search_limit=DEFAULT_SEARCH_LIMI
             weights[y:y+hh,x:x+ww] += window[:hh,:ww]
     valid = weights > 0
     probability[valid] = sums[valid]/weights[valid]
+    if polygon is not None:
+        allowed=cv2.erode(polygon_area.mask(polygon,probability.shape),np.ones((3,3),np.uint8))
+        probability[allowed==0] = -1
+        if any(probability[y,x]<0 for x,y in pixels):
+            raise ValueError('Mueve los marcadores un poco hacia el interior del poligono.')
     centering = center_penalty(probability,threshold)
     sections = []
     raw_nodes = 0
@@ -137,7 +145,12 @@ def trace(image, anchors, threshold, image_key, search_limit=DEFAULT_SEARCH_LIMI
             if offset+193>=len(raw):
                 points[-1] = anchors[leg+1]
             raw_nodes += len(points)
+            raw_points = points
             points = simplify_path(points,tolerance_m,bbox)
+            if polygon is not None:
+                clipped = polygon_area.clip([points],polygon)
+                if len(clipped)!=1 or len(clipped[0])!=len(points) or any(not polygon_area.inside(p,polygon) for p in points):
+                    points = raw_points
             low = float(np.mean(values < threshold))
             sections.append({'path': points, 'uncertain': low > .15 or junction, 'junction':junction,
                              'low_fraction': round(low,3), 'confidence': round(float(values.mean()),3)})

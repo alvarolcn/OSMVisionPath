@@ -22,3 +22,7 @@ label:has(> #show-mask){margin-bottom:22px}
 .trace-edit-tools{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}.trace-edit-tools button{font-size:12px;padding:8px 10px}#trace-edit-help{margin-bottom:12px}
 #map.split-cursor{cursor:url('/static/scissors-cursor.svg') 16 16,crosshair}
 #review-export-controls{border:0;padding:0;margin:0;min-width:0}#review-export-controls:disabled{opacity:.5}
+
+#close-polygon:not([hidden]){background:#fff0cd;border-color:#c98c25;color:#694714;animation:close-polygon-pulse 1.2s ease-in-out infinite}@keyframes close-polygon-pulse{0%,100%{box-shadow:0 0 0 0 #dca13700}50%{box-shadow:0 0 0 5px #dca13755;background:#ffe1a0}}@media(prefers-reduced-motion:reduce){#close-polygon{animation:none!important}}
+
+#ortho-size-estimate.memory-over-limit{color:#a5432c;font-weight:600}#ortho-memory-info,#ortho-size-estimate{display:block;margin:8px 0}

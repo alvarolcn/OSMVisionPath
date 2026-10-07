@@ -28,7 +28,7 @@ const assert=require('assert'),fs=require('fs');
   await page.locator('#mode').selectOption('wololo');assert(await page.locator('#tool').isVisible());assert(await page.locator('#tool-nodes').isVisible());
   await page.locator('#map').focus();await page.keyboard.press('a');assert.equal(await page.locator('#tool').inputValue(),'correct');
   await page.locator('#mode').selectOption('segmentation');assert.equal(await page.locator('#tool').inputValue(),'select');
-  await page.locator('#span').fill('1000');await page.locator('#span').press('Tab');assert(await page.locator('#auto-detect').isDisabled());
+  await page.locator('#ortho-gsd').selectOption('2');assert(await page.locator('#auto-detect').isDisabled());
   console.log('Model switch OK: detects twice on one downloaded image, preserves zoom, area changes still require reload.');
  }finally{await browser.close();}
 })().catch(error=>{console.error(error);process.exit(1);});

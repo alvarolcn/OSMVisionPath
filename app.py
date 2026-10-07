@@ -11,6 +11,9 @@ import numpy as np
 import requests
 import extraction
 import wololo
+import ortho_mosaic
+import polygon_area
+import system_memory
 from collections import OrderedDict
 from flask import Flask, jsonify, request, send_from_directory
 from werkzeug.exceptions import HTTPException
@@ -85,8 +88,8 @@ def read_bbox(value):
     if not all(math.isfinite(x) and abs(x) < 21000000 for x in bbox):
         raise ValueError("Coordenadas fuera de rango.")
     width, height = bbox[2] - bbox[0], bbox[3] - bbox[1]
-    if not (100 <= width <= 5000 and 100 <= height <= 5000):
-        raise ValueError("El área debe tener ancho y alto entre 100 y 5000 metros proyectados.")
+    if not (100 <= width <= 50000 and 100 <= height <= 50000):
+        raise ValueError("El área debe tener ancho y alto entre 100 y 50000 metros proyectados.")
     return bbox
 
 
@@ -181,8 +184,12 @@ def extract():
     mode = data.get('mode','automatic')
     if mode == 'segmentation':
         ensure_local_model()
-    mask,info = extraction.candidate_mask(orthophoto(bbox) if data.get("source","pnoa")=="pnoa" else orthophoto(bbox,data["source"]),mode,threshold,return_info=True)
-    paths = extraction.centerlines(mask)
+    polygon = polygon_area.validate(data.get('polygon'))
+    mask,info = extraction.candidate_mask(analysis_image(bbox,data.get("source","pnoa")),mode,threshold,return_info=True)
+    if polygon is not None:
+        mask[polygon_area.mask(polygon,mask.shape)==0] = 0
+        info['coverage_percent'] = round(100*float(np.count_nonzero(mask))/mask.size,2)
+    paths = polygon_area.clip(extraction.centerlines(mask),polygon)
     return jsonify(paths=paths, mask=encode(mask), diagnostics=info, geojson=paths_geojson(paths,bbox,mode,data.get("source","pnoa")),
                    message='Candidatos detectados. Selecciona uno para corregirlo.' if paths else 'No se encontraron trazados. Ajusta el umbral o usa puntos manuales.')
 
@@ -194,30 +201,64 @@ def paths_geojson(paths,bbox,method,source="pnoa"):
         for path in paths]}
 
 
+@app.get('/api/system-memory')
+def system_memory_info():
+    return jsonify(system_memory.memory_info())
+
+
+@app.get('/api/ortho-progress/<token>')
+def ortho_progress(token):
+    with ortho_mosaic.progress_lock:
+        return jsonify(ortho_mosaic.progress.get(token,{'status':'waiting','completed':0,'total':0}))
+
+
+def analysis_image(bbox,source='pnoa'):
+    cached = downloaded_images.get(image_key(bbox,source))
+    if cached is not None: return cached
+    return orthophoto(bbox) if source=='pnoa' else orthophoto(bbox,source)
+
+
 @app.post("/api/ortho")
 def load():
     data = request.get_json()
     lon, lat, span = float(data["lon"]), float(data["lat"]), float(data["span"])
-    if not all(math.isfinite(v) for v in (lon, lat, span)) or not (-19 <= lon <= 5 and 27 <= lat <= 44.5 and 100 <= span <= 5000):
-        raise ValueError("Introduce un centro en España y un ancho de 100 a 5000 m.")
+    if not all(math.isfinite(v) for v in (lon, lat, span)) or not (-19 <= lon <= 5 and 27 <= lat <= 44.5 and 100 <= span <= 30000):
+        raise ValueError("Introduce un centro en España y un ancho de 100 a 30000 m.")
     x, y = project(lon, lat)
     # Ground distance converted to Web Mercator distance at the center latitude.
     half = span / math.cos(math.radians(lat)) / 2
-    if half * 2 > 5000:
-        raise ValueError("Reduce el ancho: el límite es 5000 m en la proyección.")
+    if half * 2 > 50000:
+        raise ValueError("Reduce el ancho: el límite es 50000 m en la proyección.")
     bbox = (x-half, y-half, x+half, y+half)
     source = data.get("source","pnoa")
     provider(source)
     if "bbox" in data:
         bbox = read_bbox(data["bbox"])
-    image = orthophoto(bbox) if source=="pnoa" else orthophoto(bbox,source)
+    polygon_area.validate(data.get('polygon'))
+    tiles = 1
+    if 'gsd' in data:
+        token = data.get('progress_id')
+        if token is not None and (not isinstance(token,str) or not token.isalnum() or len(token)>64):
+            raise ValueError('Identificador de descarga no valido.')
+        megapixels=data.get('max_megapixels')
+        if megapixels is not None and (isinstance(megapixels,bool) or not isinstance(megapixels,(int,float)) or not math.isfinite(megapixels) or megapixels<0):
+            raise ValueError('El limite de megapixeles debe ser un numero positivo, o 0 sin limite.')
+        limit=None if megapixels is None else int(megapixels*1e6)
+        image,tiles = ortho_mosaic.download(bbox,source,data['gsd'],token,max_pixels=limit)
+    else:
+        image = orthophoto(bbox) if source=="pnoa" else orthophoto(bbox,source)
     downloaded_images[image_key(bbox,source)] = image
     downloaded_images.move_to_end(image_key(bbox,source))
     while len(downloaded_images) > 2:
         downloaded_images.popitem(last=False)
     height,width = image.shape[:2]
-    return jsonify(image=encode(image), bbox=bbox, width=width, height=height,
-                   meters_per_pixel=round(span/width,4),source=source)
+    preview = image
+    if max(width,height)>4096:
+        ratio = 4096/max(width,height)
+        preview = cv2.resize(image,(round(width*ratio),round(height*ratio)),interpolation=cv2.INTER_AREA)
+    ground_width = (bbox[2]-bbox[0])*math.cos(math.radians(unproject((bbox[0]+bbox[2])/2,(bbox[1]+bbox[3])/2)[1]))
+    return jsonify(image=encode(preview), bbox=bbox, width=width, height=height,
+                   meters_per_pixel=round(ground_width/width,4),source=source,tiles=tiles)
 
 
 @app.post('/api/wololo')
@@ -250,7 +291,11 @@ def guided_trace():
     tolerance = float(data.get('tolerance_m',.5))
     if not math.isfinite(tolerance) or tolerance not in (.25,.5,1.,2.,5.):
         raise ValueError('Selecciona una tolerancia de 0,25; 0,5; 1; 2 o 5 metros.')
-    sections, diagnostics = wololo.trace(image,checked,threshold,bbox,search_limit,tolerance_m=tolerance,bbox=bbox)
+    polygon = polygon_area.validate(data.get('polygon'))
+    if polygon is not None and any(not polygon_area.inside(point,polygon) for point in checked):
+        raise ValueError('Todos los marcadores deben estar dentro del poligono seleccionado.')
+    options = {'polygon':polygon} if polygon is not None else {}
+    sections, diagnostics = wololo.trace(image,checked,threshold,bbox,search_limit,tolerance_m=tolerance,bbox=bbox,**options)
     return jsonify(sections=sections,diagnostics=diagnostics)
 
 
@@ -274,7 +319,7 @@ def trace():
     sensitivity = float(data.get("sensitivity", 25))
     if not math.isfinite(sensitivity) or not 5 <= sensitivity <= 80:
         raise ValueError("Sensibilidad fuera de rango.")
-    path = detect(orthophoto(bbox) if data.get("source","pnoa")=="pnoa" else orthophoto(bbox,data["source"]), checked, sensitivity)
+    path = detect(analysis_image(bbox,data.get("source","pnoa")), checked, sensitivity)
     coords = [unproject(bbox[0]+x*(bbox[2]-bbox[0]), bbox[3]-y*(bbox[3]-bbox[1])) for x,y in path]
     meters = 0
     for a,b in zip(coords,coords[1:]):
